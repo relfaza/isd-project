@@ -1,0 +1,212 @@
+<?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+if (
+    !isset($_SESSION['user_id'], $_SESSION['role']) ||
+    $_SESSION['role'] !== 'admin'
+) {
+    header('Location: index.php');
+    exit;
+}
+
+require_once __DIR__ . '/db.php';
+
+$errors = [];
+$formError = '';
+$form = [
+    'title' => '',
+    'author' => '',
+    'category' => '',
+    'isbn' => '',
+    'publication_year' => '',
+    'description' => '',
+    'stock' => '',
+];
+
+function add_book_pdo(): PDO
+{
+    foreach (['pdo', 'db', 'conn'] as $name) {
+        if (isset($GLOBALS[$name]) && $GLOBALS[$name] instanceof PDO) {
+            return $GLOBALS[$name];
+        }
+    }
+
+    throw new RuntimeException('PDO database connection not found. Expected $pdo, $db, or $conn from db.php.');
+}
+
+function add_book_text($value): string
+{
+    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    foreach ($form as $field => $value) {
+        $form[$field] = trim($_POST[$field] ?? '');
+    }
+
+    if ($form['title'] === '') {
+        $errors['title'] = 'Title is required.';
+    }
+
+    if ($form['author'] === '') {
+        $errors['author'] = 'Author is required.';
+    }
+
+    if ($form['stock'] === '') {
+        $errors['stock'] = 'Stock is required.';
+    } elseif (!ctype_digit($form['stock'])) {
+        $errors['stock'] = 'Stock must be a whole number.';
+    }
+
+    if (
+        $form['publication_year'] !== '' &&
+        !preg_match('/^\d{4}$/', $form['publication_year'])
+    ) {
+        $errors['publication_year'] = 'Publication year must be 4 digits.';
+    }
+
+    if (empty($errors)) {
+        try {
+            $pdo = add_book_pdo();
+            $statement = $pdo->prepare(
+                'INSERT INTO books (title, author, category, isbn, publication_year, description, stock)
+                 VALUES (:title, :author, :category, :isbn, :publication_year, :description, :stock)'
+            );
+
+            $statement->execute([
+                ':title' => $form['title'],
+                ':author' => $form['author'],
+                ':category' => $form['category'] !== '' ? $form['category'] : null,
+                ':isbn' => $form['isbn'] !== '' ? $form['isbn'] : null,
+                ':publication_year' => $form['publication_year'] !== '' ? (int) $form['publication_year'] : null,
+                ':description' => $form['description'] !== '' ? $form['description'] : null,
+                ':stock' => (int) $form['stock'],
+            ]);
+
+            header('Location: admin_books.php?success=1');
+            exit;
+        } catch (Throwable $exception) {
+            $formError = $exception->getMessage();
+        }
+    }
+}
+?>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Add New Book</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom">
+        <div class="container">
+            <a class="navbar-brand fw-semibold" href="admin_dashboard.php">Library Admin</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#adminNavbar" aria-controls="adminNavbar" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="adminNavbar">
+                <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center">
+                    <li class="nav-item">
+                        <a class="nav-link" href="admin_dashboard.php">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" aria-current="page" href="admin_books.php">Manage Books</a>
+                    </li>
+                    <li class="nav-item ms-lg-2">
+                        <a class="btn btn-outline-secondary btn-sm" href="logout.php">Logout</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container py-4 py-lg-5">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+            <div>
+                <h1 class="h3 mb-1">Add New Book</h1>
+                <p class="text-muted mb-0">Create a new catalog record.</p>
+            </div>
+            <a class="btn btn-outline-secondary" href="admin_books.php">Back to Book List</a>
+        </div>
+
+        <?php if ($formError !== ''): ?>
+            <div class="alert alert-danger" role="alert">
+                Unable to save book.
+                <span class="d-block small mt-1"><?php echo add_book_text($formError); ?></span>
+            </div>
+        <?php endif; ?>
+
+        <?php if (!empty($errors)): ?>
+            <div class="alert alert-warning" role="alert">
+                Please fix the highlighted fields before saving.
+            </div>
+        <?php endif; ?>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-4">
+                <form method="post" action="admin_book_add.php" novalidate>
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            <label for="title" class="form-label">Title <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control<?php echo isset($errors['title']) ? ' is-invalid' : ''; ?>" id="title" name="title" value="<?php echo add_book_text($form['title']); ?>" required>
+                            <?php if (isset($errors['title'])): ?>
+                                <div class="invalid-feedback"><?php echo add_book_text($errors['title']); ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label for="author" class="form-label">Author <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control<?php echo isset($errors['author']) ? ' is-invalid' : ''; ?>" id="author" name="author" value="<?php echo add_book_text($form['author']); ?>" required>
+                            <?php if (isset($errors['author'])): ?>
+                                <div class="invalid-feedback"><?php echo add_book_text($errors['author']); ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label for="category" class="form-label">Category</label>
+                            <input type="text" class="form-control" id="category" name="category" value="<?php echo add_book_text($form['category']); ?>">
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label for="isbn" class="form-label">ISBN</label>
+                            <input type="text" class="form-control" id="isbn" name="isbn" value="<?php echo add_book_text($form['isbn']); ?>">
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label for="publication_year" class="form-label">Publication Year</label>
+                            <input type="number" class="form-control<?php echo isset($errors['publication_year']) ? ' is-invalid' : ''; ?>" id="publication_year" name="publication_year" min="1000" max="9999" value="<?php echo add_book_text($form['publication_year']); ?>">
+                            <?php if (isset($errors['publication_year'])): ?>
+                                <div class="invalid-feedback"><?php echo add_book_text($errors['publication_year']); ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label for="stock" class="form-label">Stock <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control<?php echo isset($errors['stock']) ? ' is-invalid' : ''; ?>" id="stock" name="stock" min="0" value="<?php echo add_book_text($form['stock']); ?>" required>
+                            <?php if (isset($errors['stock'])): ?>
+                                <div class="invalid-feedback"><?php echo add_book_text($errors['stock']); ?></div>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="col-12">
+                            <label for="description" class="form-label">Description</label>
+                            <textarea class="form-control" id="description" name="description" rows="4"><?php echo add_book_text($form['description']); ?></textarea>
+                        </div>
+                    </div>
+
+                    <div class="d-flex flex-column flex-sm-row gap-2 justify-content-end mt-4">
+                        <a class="btn btn-outline-secondary" href="admin_books.php">Back to Book List</a>
+                        <button type="submit" class="btn btn-primary">Save Book</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
